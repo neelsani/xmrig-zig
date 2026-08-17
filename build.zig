@@ -101,6 +101,7 @@ const Options = struct {
     kawpow: bool,
     ghostrider: bool,
     static_exe: bool,
+    no_donation: bool,
 
     fn init(b: *std.Build) Options {
         return .{
@@ -126,6 +127,7 @@ const Options = struct {
             .kawpow = boolOption(b, "kawpow", "Enable KawPow algorithms family", true),
             .ghostrider = boolOption(b, "ghostrider", "Enable GhostRider algorithm", true),
             .static_exe = boolOption(b, "static", "Build static binary", false),
+            .no_donation = boolOption(b, "no_donation", "Disable built-in dev donation", false),
         };
     }
 };
@@ -154,18 +156,14 @@ pub fn build(b: *std.Build) void {
 
     // -------------------------------------------------------------- openssl
     var ssl_artifact: ?*std.Build.Step.Compile = null;
-    var crypto_artifact: ?*std.Build.Step.Compile = null;
     var ssl_include: ?std.Build.LazyPath = null;
-    var ssl_include_gen: ?std.Build.LazyPath = null;
     if (opts.tls) {
         const ssl_dep = b.dependency("openssl", .{
             .target = target,
             .optimize = optimize,
         });
-        ssl_artifact = ssl_dep.artifact("ssl");
-        crypto_artifact = ssl_dep.artifact("crypto");
-        ssl_include = ssl_dep.path("include");
-        ssl_include_gen = ssl_dep.path("include_gen");
+        ssl_artifact = ssl_dep.artifact("openssl");
+        ssl_include = ssl_artifact.?.getEmittedIncludeTree();
     }
 
     // ------------------------------------------------------------ xmrig-asm
@@ -335,8 +333,9 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(xmrig.path(src));
     mod.addIncludePath(xmrig.path("src/3rdparty"));
 
+    if (opts.no_donation) mod.addCMacro("XMRIG_NO_DONATION", "");
+
     if (ssl_include) |p| mod.addIncludePath(p);
-    if (ssl_include_gen) |p| mod.addIncludePath(p);
 
     // -------- defines
     mod.addCMacro("XMRIG_MINER_PROJECT", "");
@@ -909,7 +908,6 @@ pub fn build(b: *std.Build) void {
     if (ethash_lib) |lib| mod.linkLibrary(lib);
     if (ghostrider_lib) |lib| mod.linkLibrary(lib);
     if (ssl_artifact) |lib| mod.linkLibrary(lib);
-    if (crypto_artifact) |lib| mod.linkLibrary(lib);
 
     if (is_win) {
         mod.linkSystemLibrary("ws2_32", .{});

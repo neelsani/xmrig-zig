@@ -1,12 +1,15 @@
 # apply-patches.ps1
-# Applies the openssl-zig patches into the project's zig-pkg cache so the
-# (incomplete) upstream openssl-zig package at the pinned commit builds for
-# Windows/x86_64. Idempotent: safe to run repeatedly.
+# Applies the required patches into the project's zig-pkg cache so the pinned
+# upstream packages build correctly for Windows/x86_64. Idempotent: safe to run
+# repeatedly.
+#
+# Patches:
+#   - donate.h (text replace): guards xmrig's donate.h constants so the dev
+#     donation can be disabled at build time (-Dno_donation).
 #
 # Requirements: git on PATH. Run from anywhere; the script locates the project.
 #
 # After a fresh clone:
-#   zig build --fetch          # or run this script (it does this itself)
 #   powershell -File patches\apply-patches.ps1
 #   zig build -Drelease=true
 
@@ -14,7 +17,6 @@ $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $project   = Split-Path -Parent $scriptDir
-$patchFile = Join-Path $scriptDir 'openssl-zig.patch'
 
 Push-Location $project
 try {
@@ -22,34 +24,27 @@ try {
     & zig build --fetch
     if ($LASTEXITCODE -ne 0) { throw "zig build --fetch failed (exit $LASTEXITCODE)" }
 
-    # 2. Locate the openssl-zig package dir (uniquely identified by its x509 header)
-    $ossl = Get-ChildItem -Path 'zig-pkg' -Directory | Where-Object {
-        Test-Path (Join-Path $_.FullName 'crypto\x509\standard_exts.h')
+    # 2. xmrig: locate package dir (identified by src/donate.h) and apply the
+    #    donate.h change by deterministic text replacement.
+    $xmr = Get-ChildItem -Path 'zig-pkg' -Directory | Where-Object {
+        Test-Path (Join-Path $_.FullName 'src\donate.h')
     } | Select-Object -First 1
-    if (-not $ossl) { throw 'openssl-zig package not found in zig-pkg' }
+    if (-not $xmr) { throw 'xmrig package not found in zig-pkg' }
 
-    # 3. Idempotency check: patched if the generated file exists AND build.zig carries our marker
-    $markerFile = Join-Path $ossl.FullName 'providers\implementations\ciphers\ciphercommon.c'
-    $buildZig   = Get-Content (Join-Path $ossl.FullName 'build.zig') -Raw -ErrorAction SilentlyContinue
-    $already    = (Test-Path $markerFile) -and ($buildZig -match 'ENGINESDIR')
-    if ($already) {
-        Write-Host "openssl-zig already patched ($($ossl.Name))"
-        return
+    $donateFile = Join-Path $xmr.FullName 'src\donate.h'
+    $donateText = [System.IO.File]::ReadAllText($donateFile)
+    if ($donateText -match 'XMRIG_NO_DONATION') {
+        Write-Host "xmrig already patched ($($xmr.Name))"
     }
+    else {
+        $old = "constexpr const int kDefaultDonateLevel = 1;`nconstexpr const int kMinimumDonateLevel = 1;"
+        $new = "#ifndef XMRIG_NO_DONATION`nconstexpr const int kDefaultDonateLevel = 1;`nconstexpr const int kMinimumDonateLevel = 1;`n#else`nconstexpr const int kDefaultDonateLevel = 0;`nconstexpr const int kMinimumDonateLevel = 0;`n#endif"
+        if (-not $donateText.Contains($old)) { throw 'donate.h does not contain the expected default donation lines' }
 
-    # 4. Apply the patch (relative a/ b/ paths, so run inside the package dir)
-    Push-Location $ossl.FullName
-    try {
-        & git apply --whitespace=nowarn $patchFile
-        if ($LASTEXITCODE -ne 0) { throw 'git apply failed' }
+        $patched = $donateText.Replace($old, $new)
+        [System.IO.File]::WriteAllText($donateFile, $patched, (New-Object System.Text.UTF8Encoding $false))
+        Write-Host "xmrig patched OK ($($xmr.Name))"
     }
-    finally { Pop-Location }
-
-    # 5. Verify
-    $buildZig = Get-Content (Join-Path $ossl.FullName 'build.zig') -Raw
-    if (-not (Test-Path $markerFile)) { throw 'patch applied but ciphercommon.c is missing' }
-    if ($buildZig -notmatch 'ENGINESDIR') { throw 'patch applied but build.zig marker is missing' }
-    Write-Host "openssl-zig patched OK ($($ossl.Name))"
 }
 finally {
     Pop-Location
