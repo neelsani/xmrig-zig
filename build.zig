@@ -934,6 +934,7 @@ pub fn build(b: *std.Build) void {
     if (is_win) {
         const driver = b.addInstallFileWithDir(xmrig.path("bin/WinRing0/WinRing0x64.sys"), .bin, "WinRing0x64.sys");
         b.getInstallStep().dependOn(&driver.step);
+        b.addNamedLazyPath("winring0", xmrig.path("bin/WinRing0/WinRing0x64.sys"));
     }
 
     const run_cmd = b.addRunArtifact(exe);
