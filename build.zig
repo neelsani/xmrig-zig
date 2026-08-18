@@ -333,7 +333,13 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(xmrig.path(src));
     mod.addIncludePath(xmrig.path("src/3rdparty"));
 
-    if (opts.no_donation) mod.addCMacro("XMRIG_NO_DONATION", "");
+    if (opts.no_donation) {
+        // Satisfy donate.h's include guard so its constexpr defaults are
+        // skipped, and supply 0% defaults via macros instead of patching.
+        mod.addCMacro("XMRIG_DONATE_H", "");
+        mod.addCMacro("kDefaultDonateLevel", "0");
+        mod.addCMacro("kMinimumDonateLevel", "0");
+    }
 
     if (ssl_include) |p| mod.addIncludePath(p);
 
