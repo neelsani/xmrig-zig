@@ -11,8 +11,8 @@
             .hash = "libuv-1.52.0-htqqvzNqAAAB6cHIx-wIffe_mqMW5GOKjHeDBJYHGwls",
         },
         .openssl = .{
-            .url = "git+https://github.com/neelsani/openssl-zig.git#e4a8ff6df7db7473c370ceef3bcfea4ebe44c275",
-            .hash = "openssl_zig-0.1.0-x39XcnKnZADqKczCt5Ozlq3ukjdQ5rhQq4AXnGnvkd32",
+            .url = "git+https://github.com/neelsani/openssl-zig.git#a534dcf44650c1f417bf42181f7494c6b35a480b",
+            .hash = "openssl_zig-0.1.0-x39XcpeqZAA0br4S5Wm7JIazkykeFKTiG19OFnIWfgvp",
         },
     },
     .minimum_zig_version = "0.16.0",

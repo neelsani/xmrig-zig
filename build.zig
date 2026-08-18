@@ -140,7 +140,11 @@ pub fn build(b: *std.Build) void {
 
     const t = target.result;
     const is_win = t.os.tag == .windows;
+    const is_mac = t.os.tag == .macos;
+    const is_linux = t.os.tag == .linux;
     const is_x86_64 = t.cpu.arch == .x86_64;
+    const is_aarch64 = t.cpu.arch == .aarch64;
+    const is_arm = t.cpu.arch.isArm() or t.cpu.arch.isAARCH64();
     const want_asm = opts.use_asm and is_x86_64;
 
     // --------------------------------------------------------------- xmrig dep
@@ -208,7 +212,11 @@ pub fn build(b: *std.Build) void {
 
     // ----------------------------------------------------------------- argon2
     var argon2_lib: ?*std.Build.Step.Compile = null;
-    if (opts.argon2 and is_x86_64) {
+    if (opts.argon2) {
+        const a2_arch = if (is_x86_64)
+            "src/3rdparty/argon2/arch/x86_64/lib/argon2-arch.c"
+        else
+            "src/3rdparty/argon2/arch/generic/lib/argon2-arch.c";
         const a2_mod = b.createModule(.{
             .target = target,
             .optimize = optimize,
@@ -225,7 +233,7 @@ pub fn build(b: *std.Build) void {
                 "src/3rdparty/argon2/lib/genkat.c",
                 "src/3rdparty/argon2/lib/impl-select.c",
                 "src/3rdparty/argon2/lib/blake2/blake2.c",
-                "src/3rdparty/argon2/arch/x86_64/lib/argon2-arch.c",
+                a2_arch,
             },
             .flags = &.{ "-Wall", "-Wno-strict-aliasing" },
         });
@@ -234,11 +242,13 @@ pub fn build(b: *std.Build) void {
             .linkage = .static,
             .root_module = a2_mod,
         });
-        a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-sse2", target, optimize, &.{.sse2}, "HAVE_SSE2", "src/3rdparty/argon2/arch/x86_64/lib/argon2-sse2.c"));
-        a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-ssse3", target, optimize, &.{.ssse3}, "HAVE_SSSE3", "src/3rdparty/argon2/arch/x86_64/lib/argon2-ssse3.c"));
-        a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-xop", target, optimize, &.{.xop}, "HAVE_XOP", "src/3rdparty/argon2/arch/x86_64/lib/argon2-xop.c"));
-        a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-avx2", target, optimize, &.{.avx2}, "HAVE_AVX2", "src/3rdparty/argon2/arch/x86_64/lib/argon2-avx2.c"));
+        if (is_x86_64) {
+            a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-sse2", target, optimize, &.{.sse2}, "HAVE_SSE2", "src/3rdparty/argon2/arch/x86_64/lib/argon2-sse2.c"));
+            a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-ssse3", target, optimize, &.{.ssse3}, "HAVE_SSSE3", "src/3rdparty/argon2/arch/x86_64/lib/argon2-ssse3.c"));
+            a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-xop", target, optimize, &.{.xop}, "HAVE_XOP", "src/3rdparty/argon2/arch/x86_64/lib/argon2-xop.c"));
+            a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-avx2", target, optimize, &.{.avx2}, "HAVE_AVX2", "src/3rdparty/argon2/arch/x86_64/lib/argon2-avx2.c"));
         a2_mod.linkLibrary(archFeatureLib(b, xmrig, "argon2-avx512f", target, optimize, &.{ .avx512f, .evex512 }, "HAVE_AVX512F", "src/3rdparty/argon2/arch/x86_64/lib/argon2-avx512f.c"));
+        }
     }
 
     // ------------------------------------------------------------------ ethash
@@ -268,7 +278,7 @@ pub fn build(b: *std.Build) void {
 
     // --------------------------------------------------------------- ghostrider
     var ghostrider_lib: ?*std.Build.Step.Compile = null;
-    if (opts.ghostrider) {
+    if (opts.ghostrider and is_x86_64) {
         const gr_target = if (is_x86_64) x86Target(b, target, &.{.aes}) else target;
         const gr_mod = b.createModule(.{
             .target = gr_target,
@@ -352,7 +362,7 @@ pub fn build(b: *std.Build) void {
     mod.addCMacro("_CRT_SECURE_NO_WARNINGS", "");
     mod.addCMacro("_CRT_NONSTDC_NO_WARNINGS", "");
     mod.addCMacro("NOMINMAX", "");
-    mod.addCMacro("HAVE_ROTR", "");
+    if (is_x86_64) mod.addCMacro("HAVE_ROTR", "");
     mod.addCMacro("XMRIG_64_BIT", "");
 
     if (is_win) {
@@ -360,6 +370,19 @@ pub fn build(b: *std.Build) void {
         mod.addCMacro("XMRIG_OS_WIN", "");
         mod.addCMacro("HAVE_ALIGNED_MALLOC", "");
     }
+    if (is_mac) {
+        mod.addCMacro("XMRIG_OS_APPLE", "");
+        mod.addCMacro("XMRIG_OS_MACOS", "");
+        mod.addCMacro("XMRIG_OS_UNIX", "");
+        mod.addCMacro("HAVE_POSIX_MEMALIGN", "");
+    }
+    if (is_linux) {
+        mod.addCMacro("XMRIG_OS_UNIX", "");
+        mod.addCMacro("XMRIG_OS_LINUX", "");
+        mod.addCMacro("HAVE_POSIX_MEMALIGN", "");
+    }
+    if (is_aarch64) mod.addCMacro("XMRIG_ARM", "8");
+    if (is_arm and !is_aarch64) mod.addCMacro("XMRIG_ARM", "7");
 
     if (is_x86_64) mod.addCMacro("RAPIDJSON_SSE2", "");
     mod.addCMacro("RAPIDJSON_WRITE_DEFAULT_FLAGS", "6");
@@ -371,7 +394,7 @@ pub fn build(b: *std.Build) void {
     if (opts.randomx) mod.addCMacro("XMRIG_ALGO_RANDOMX", "");
     if (opts.argon2) mod.addCMacro("XMRIG_ALGO_ARGON2", "");
     if (opts.kawpow) mod.addCMacro("XMRIG_ALGO_KAWPOW", "");
-    if (opts.ghostrider) mod.addCMacro("XMRIG_ALGO_GHOSTRIDER", "");
+    if (opts.ghostrider and is_x86_64) mod.addCMacro("XMRIG_ALGO_GHOSTRIDER", "");
 
     if (opts.http) {
         mod.addCMacro("XMRIG_FEATURE_HTTP", "");
@@ -380,11 +403,11 @@ pub fn build(b: *std.Build) void {
     if (opts.tls) mod.addCMacro("XMRIG_FEATURE_TLS", "");
     if (opts.env) mod.addCMacro("XMRIG_FEATURE_ENV", "");
     if (opts.randomx and opts.benchmark) mod.addCMacro("XMRIG_FEATURE_BENCHMARK", "");
-    if ((opts.dmi and is_win) or opts.http) mod.addCMacro("XMRIG_FEATURE_DMI", "");
+    if (opts.dmi and (is_win or is_linux or (is_mac and !is_arm))) mod.addCMacro("XMRIG_FEATURE_DMI", "");
     if (want_asm) mod.addCMacro("XMRIG_FEATURE_ASM", "");
     if (opts.sse4_1 and is_x86_64) mod.addCMacro("XMRIG_FEATURE_SSE4_1", "");
     if (opts.avx2 and is_x86_64) mod.addCMacro("XMRIG_FEATURE_AVX2", "");
-    if (opts.vaes) mod.addCMacro("XMRIG_VAES", "");
+    if (opts.vaes and is_x86_64) mod.addCMacro("XMRIG_VAES", "");
     if (opts.opencl) {
         mod.addCMacro("XMRIG_FEATURE_OPENCL", "");
         mod.addCMacro("CL_USE_DEPRECATED_OPENCL_1_2_APIS", "");
@@ -490,6 +513,26 @@ pub fn build(b: *std.Build) void {
                 src ++ "/base/io/json/Json_win.cpp",
                 src ++ "/base/kernel/Platform_win.cpp",
                 src ++ "/base/kernel/Process_win.cpp",
+            },
+            .flags = cpp_flags,
+        });
+    } else if (is_mac) {
+        mod.addCSourceFiles(.{
+            .root = xmr_root,
+            .files = &.{
+                src ++ "/base/io/json/Json_unix.cpp",
+                src ++ "/base/kernel/Platform_mac.cpp",
+                src ++ "/base/kernel/Process_unix.cpp",
+            },
+            .flags = cpp_flags,
+        });
+    } else {
+        mod.addCSourceFiles(.{
+            .root = xmr_root,
+            .files = &.{
+                src ++ "/base/io/json/Json_unix.cpp",
+                src ++ "/base/kernel/Platform_unix.cpp",
+                src ++ "/base/kernel/Process_unix.cpp",
             },
             .flags = cpp_flags,
         });
@@ -638,6 +681,24 @@ pub fn build(b: *std.Build) void {
             },
             .flags = cpp_flags,
         });
+    } else {
+        mod.addCSourceFiles(.{
+            .root = xmr_root,
+            .files = &.{
+                src ++ "/App_unix.cpp",
+                src ++ "/crypto/common/VirtualMemory_unix.cpp",
+            },
+            .flags = cpp_flags,
+        });
+        if (is_linux) {
+            mod.addCSourceFiles(.{
+                .root = xmr_root,
+                .files = &.{
+                    src ++ "/crypto/common/LinuxMemory.cpp",
+                },
+                .flags = cpp_flags,
+            });
+        }
     }
 
     // -------- randomx
@@ -693,6 +754,15 @@ pub fn build(b: *std.Build) void {
             mod.addCSourceFile(.{
                 .file = xmrig.path(src ++ "/crypto/randomx/jit_compiler_x86.cpp"),
                 .flags = concat(b, cpp_flags, &.{ "-Wno-unused-const-variable" }),
+            });
+        } else if (is_aarch64) {
+            mod.addCSourceFile(.{
+                .file = xmrig.path(src ++ "/crypto/randomx/jit_compiler_a64_static.S"),
+                .language = .assembly_with_preprocessor,
+            });
+            mod.addCSourceFile(.{
+                .file = xmrig.path(src ++ "/crypto/randomx/jit_compiler_a64.cpp"),
+                .flags = cpp_flags,
             });
         } else {
             mod.addCSourceFile(.{
@@ -777,6 +847,11 @@ pub fn build(b: *std.Build) void {
                 .file = xmrig.path(src ++ "/backend/opencl/OclCache_win.cpp"),
                 .flags = cpp_flags,
             });
+        } else {
+            mod.addCSourceFile(.{
+                .file = xmrig.path(src ++ "/backend/opencl/OclCache_unix.cpp"),
+                .flags = cpp_flags,
+            });
         }
         if (opts.randomx) {
             mod.addCSourceFiles(.{
@@ -816,6 +891,11 @@ pub fn build(b: *std.Build) void {
         if (is_win) {
             mod.addCSourceFile(.{
                 .file = xmrig.path(src ++ "/backend/opencl/wrappers/AdlLib.cpp"),
+                .flags = cpp_flags,
+            });
+        } else {
+            mod.addCSourceFile(.{
+                .file = xmrig.path(src ++ "/backend/opencl/wrappers/AdlLib_linux.cpp"),
                 .flags = cpp_flags,
             });
         }
@@ -862,21 +942,51 @@ pub fn build(b: *std.Build) void {
             src ++ "/backend/cpu/CpuThread.cpp",
             src ++ "/backend/cpu/CpuThreads.cpp",
             src ++ "/backend/cpu/CpuWorker.cpp",
-            src ++ "/backend/cpu/platform/BasicCpuInfo.cpp",
         },
         .flags = cpp_flags,
     });
+    if (is_arm) {
+        mod.addCSourceFiles(.{
+            .root = xmr_root,
+            .files = &.{
+                src ++ "/backend/cpu/platform/BasicCpuInfo_arm.cpp",
+            },
+            .flags = cpp_flags,
+        });
+        if (is_win) {
+            mod.addCSourceFile(.{ .file = xmrig.path(src ++ "/backend/cpu/platform/BasicCpuInfo_arm_win.cpp"), .flags = cpp_flags });
+        } else if (is_mac) {
+            mod.addCSourceFile(.{ .file = xmrig.path(src ++ "/backend/cpu/platform/BasicCpuInfo_arm_mac.cpp"), .flags = cpp_flags });
+        } else {
+            mod.addCSourceFiles(.{
+                .root = xmr_root,
+                .files = &.{
+                    src ++ "/backend/cpu/platform/lscpu_arm.cpp",
+                    src ++ "/backend/cpu/platform/BasicCpuInfo_arm_unix.cpp",
+                },
+                .flags = cpp_flags,
+            });
+        }
+    } else {
+        mod.addCSourceFile(.{ .file = xmrig.path(src ++ "/backend/cpu/platform/BasicCpuInfo.cpp"), .flags = cpp_flags });
+    }
 
     // -------- dmi
-    if (opts.dmi and is_win) {
+    if (opts.dmi and (is_win or is_linux or (is_mac and !is_arm))) {
+        const reader = if (is_win)
+            src ++ "/hw/dmi/DmiReader_win.cpp"
+        else if (is_mac)
+            src ++ "/hw/dmi/DmiReader_mac.cpp"
+        else
+            src ++ "/hw/dmi/DmiReader_unix.cpp";
         mod.addCSourceFiles(.{
             .root = xmr_root,
             .files = &.{
                 src ++ "/hw/dmi/DmiBoard.cpp",
                 src ++ "/hw/dmi/DmiMemory.cpp",
                 src ++ "/hw/dmi/DmiReader.cpp",
-                src ++ "/hw/dmi/DmiReader_win.cpp",
                 src ++ "/hw/dmi/DmiTools.cpp",
+                reader,
             },
             .flags = cpp_flags,
         });
@@ -927,6 +1037,15 @@ pub fn build(b: *std.Build) void {
         mod.linkSystemLibrary("ntdll", .{});
         mod.linkSystemLibrary("powrprof", .{});
         if (opts.tls) mod.linkSystemLibrary("crypt32", .{});
+    } else if (is_mac) {
+        mod.linkFramework("IOKit", .{});
+        mod.linkFramework("CoreServices", .{});
+        if (opts.opencl) mod.linkFramework("OpenCL", .{});
+        mod.linkSystemLibrary("pthread", .{});
+    } else if (is_linux) {
+        mod.linkSystemLibrary("pthread", .{});
+        mod.linkSystemLibrary("rt", .{});
+        mod.linkSystemLibrary("dl", .{});
     }
 
     if (opts.static_exe) {
